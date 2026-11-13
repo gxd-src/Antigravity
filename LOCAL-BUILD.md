@@ -4,6 +4,9 @@ Build on Windows with stable Rust MSVC, C++ Build Tools and Windows SDK:
 `cargo build --release --locked`.
 
 Set AG_UPSTREAM_PROXY to your own HTTP CONNECT proxy URL at runtime.
+A convenient Windows alternative is `./start-antigravity.ps1`: it asks for the
+proxy once, saves it in ignored proxy.local.json and launches the local build
+plus Antigravity. Pass -Tui for the terminal interface. No startup downloads.
 A literal IP is required; authentication is unsupported. No endpoint is bundled.
 Missing configuration fails closed. Destination port 443 only.
 
