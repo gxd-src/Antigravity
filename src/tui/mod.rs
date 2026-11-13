@@ -30,7 +30,6 @@ use ratatui::widgets::{
 };
 use ratatui::{DefaultTerminal, Frame};
 
-use crate::auth;
 use crate::gate;
 use crate::gui::status::{self, Action, Facts, Tone};
 use crate::ops::{self, Cap, Cmd, Event, Level, State, Status, Worker};
@@ -113,7 +112,6 @@ pub fn run(note: Option<String>) -> Result<(), String> {
 
 #[derive(PartialEq)]
 enum Screen {
-    License,
     Main,
 }
 
@@ -147,9 +145,6 @@ enum Row {
 
 struct App {
     screen: Screen,
-    key: String,
-    key_error: bool,
-    key_next_attempt: Option<Instant>,
 
     update: Option<ReleaseInfo>,
     update_rx: Receiver<ReleaseInfo>,
@@ -213,9 +208,6 @@ impl App {
         list.select(Some(0));
         Self {
             screen,
-            key: String::new(),
-            key_error: false,
-            key_next_attempt: None,
             update: None,
             update_rx,
             worker,
@@ -318,9 +310,7 @@ impl App {
             self.quit = true;
             return;
         }
-        if self.screen == Screen::License {
-            self.on_license_key(k, ctrl);
-        } else if self.input.is_some() {
+        if self.input.is_some() {
             self.on_input_key(k, ctrl);
         } else {
             self.on_main_key(k);
@@ -329,10 +319,7 @@ impl App {
 
     fn on_paste(&mut self, text: &str) {
         let text = text.trim();
-        if self.screen == Screen::License {
-            self.key = text.to_string();
-            self.key_error = false;
-        } else if let Some(
+        if let Some(
             Input::Path { text: t, .. }
             | Input::OwnProxy { text: t }
             | Input::CustomDns { text: t },
@@ -342,48 +329,7 @@ impl App {
         }
     }
 
-    fn on_license_key(&mut self, k: KeyEvent, ctrl: bool) {
-        match k.code {
-            KeyCode::Esc => self.quit = true,
-            KeyCode::Enter => self.try_key(),
-            KeyCode::Backspace => {
-                self.key.pop();
-                self.key_error = false;
-            }
-            KeyCode::Char('u') if ctrl => self.key.clear(),
-            KeyCode::Char(c) if !ctrl && self.key.chars().count() < 64 => {
-                self.key.push(c);
-                self.key_error = false;
-            }
-            _ => {}
-        }
-    }
 
-    fn try_key(&mut self) {
-        let normalized = self
-            .key
-            .chars()
-            .filter(|c| c.is_ascii_alphanumeric())
-            .count();
-        if normalized != 24 {
-            self.key_error = true;
-            return;
-        }
-        let now = Instant::now();
-        if self.key_next_attempt.is_some_and(|t| t > now) {
-            return;
-        }
-        if auth::verify_key(self.key.trim()) {
-            self.worker
-                .send(Cmd::RememberLicense(self.key.trim().to_string()));
-            self.screen = Screen::Main;
-            self.worker.send(Cmd::Unlocked);
-        } else {
-            self.key_error = true;
-            // The same brake the window has on a flood of guesses.
-            self.key_next_attempt = Some(now + Duration::from_millis(500));
-        }
-    }
 
     fn on_input_key(&mut self, k: KeyEvent, ctrl: bool) {
         let Some(input) = &mut self.input else { return };
@@ -952,7 +898,6 @@ impl App {
             return;
         }
         match self.screen {
-            Screen::License => self.draw_license(f, area),
             Screen::Main => self.draw_main(f, area),
         }
     }
@@ -975,67 +920,6 @@ impl App {
         Line::from(spans)
     }
 
-    fn draw_license(&mut self, f: &mut Frame, area: Rect) {
-        let block = Block::new()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .title(self.title_line());
-        let inner = block.inner(area);
-        f.render_widget(block, area);
-
-        let shown = if self.key.is_empty() {
-            Span::styled(
-                "XXXXXXXXXXXX-XXXXXXXXXXXX",
-                Style::new().fg(Color::DarkGray),
-            )
-        } else {
-            Span::raw(self.key.clone())
-        };
-        let mut lines = vec![
-            Line::raw(""),
-            Line::styled(
-                "Лицензионный ключ",
-                Style::new().add_modifier(Modifier::BOLD),
-            ),
-            Line::raw(""),
-            Line::from(vec![
-                Span::raw("  › "),
-                shown,
-                Span::styled("▏", Style::new().fg(Color::Cyan)),
-            ]),
-            Line::raw(""),
-        ];
-        if self.key_error {
-            let normalized = self
-                .key
-                .chars()
-                .filter(|c| c.is_ascii_alphanumeric())
-                .count();
-            let why = if normalized != 24 {
-                "В ключе 24 буквы и цифры (дефис не считается)."
-            } else {
-                "Ключ не подходит к этой версии анлокера."
-            };
-            lines.push(Line::styled(why, Style::new().fg(Color::Red)));
-            lines.push(Line::raw(""));
-        }
-        lines.push(Line::styled(
-            format!(
-                "Ключ можно взять в группе: {}",
-                crate::gui::TELEGRAM_KEYS_URL
-            ),
-            Style::new().fg(Color::Gray),
-        ));
-        lines.push(Line::raw(""));
-        lines.push(Line::styled(
-            "Enter — продолжить · Ctrl+U — стереть · Esc — выход",
-            Style::new().fg(Color::DarkGray),
-        ));
-        f.render_widget(
-            Paragraph::new(lines).wrap(Wrap { trim: false }),
-            inner.inner(ratatui::layout::Margin::new(2, 1)),
-        );
-    }
 
     fn draw_main(&mut self, f: &mut Frame, area: Rect) {
         let facts = self.facts();
@@ -1309,18 +1193,9 @@ fn wrapped_height(text: &str, width: u16) -> u16 {
         .min(usize::from(u16::MAX)) as u16
 }
 
-/// The licence screen, always — except in a *debug* build started with
-/// `AG_UNLOCKER_DEV_SKIP_KEY`, as in the window.
-fn first_screen(settings: &crate::settings::Settings) -> Screen {
-    #[cfg(debug_assertions)]
-    if std::env::var_os("AG_UNLOCKER_DEV_SKIP_KEY").is_some() {
-        return Screen::Main;
-    }
-    // A key accepted before and still good for this version: no screen.
-    if auth::verify_key(&settings.license_key) {
-        return Screen::Main;
-    }
-    Screen::License
+/// This fork starts directly on the main screen; no license is required.
+fn first_screen(_settings: &crate::settings::Settings) -> Screen {
+    Screen::Main
 }
 
 enum Copied {

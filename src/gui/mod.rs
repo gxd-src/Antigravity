@@ -1,11 +1,9 @@
 //! The desktop GUI.
 //!
-//! Replaces the numbered console menu. Two screens: a licence gate, then one
-//! window of switches. Nothing here blocks — everything that touches the system
+//! A single main window of switches, with no license gate. Nothing here blocks — everything that touches the system
 //! goes to the `ops` worker and comes back as status snapshots and log lines.
 
 mod icon;
-mod license;
 mod main_view;
 pub(crate) mod renderer;
 pub(crate) mod report;
@@ -34,26 +32,11 @@ const WIN_H: f32 = 840.0;
 const LOG_LIMIT: usize = 400;
 
 enum Screen {
-    License,
     Main,
 }
 
 pub struct App {
     screen: Screen,
-    key_input: String,
-    key_rejected: bool,
-    /// Cleared after the first frame gives the key field focus, so a paste needs
-    /// no click and Enter works straight away.
-    key_needs_focus: bool,
-    /// When the next licence check may run.
-    key_next_attempt: Option<std::time::Instant>,
-    /// Timestamps of recent checks, newest last. Only the last second matters.
-    key_attempts: Vec<std::time::Instant>,
-    /// Current cooldown between checks.
-    key_cooldown: std::time::Duration,
-
-    /// Raised once a newer release is on GitHub and never lowered — the banner
-    /// has to survive the move from the licence screen to the main one.
     update: Option<ReleaseInfo>,
     update_rx: Receiver<ReleaseInfo>,
 
@@ -137,19 +120,12 @@ impl App {
         // saved last silently reverted the other.
         let settings = Settings::load();
         let screen = first_screen(&settings);
-        // A debug build told to skip the key never passes the licence screen,
-        // which is where `Unlocked` is otherwise sent from.
+        // Initialize the worker immediately; there is no license gate.
         if matches!(screen, Screen::Main) {
             worker.send(Cmd::Unlocked);
         }
         Self {
             screen,
-            key_input: String::new(),
-            key_rejected: false,
-            key_needs_focus: true,
-            key_next_attempt: None,
-            key_attempts: Vec::new(),
-            key_cooldown: std::time::Duration::from_millis(100),
             update: None,
             update_rx,
             worker,
@@ -311,7 +287,6 @@ impl eframe::App for App {
             // — ends up clipped by exactly that much.
             ui.set_min_height(avail.y - MARGIN - BOTTOM);
             match self.screen {
-                Screen::License => license::view(self, ui),
                 Screen::Main => main_view::view(self, ui),
             }
         });
@@ -395,20 +370,9 @@ fn without_source_location(msg: &str) -> &str {
         .unwrap_or(msg)
 }
 
-/// The licence screen, always - except in a *debug* build started with
-/// `AG_UNLOCKER_DEV_SKIP_KEY` set, so the main screen can be looked at while it
-/// is being worked on. Compiled out of every release build (`build_rust.py`
-/// builds release), so a shipped exe has no way past the key.
-fn first_screen(settings: &Settings) -> Screen {
-    #[cfg(debug_assertions)]
-    if std::env::var_os("AG_UNLOCKER_DEV_SKIP_KEY").is_some() {
-        return Screen::Main;
-    }
-    // A key accepted before and still good for this version: no screen.
-    if crate::auth::verify_key(&settings.license_key) {
-        return Screen::Main;
-    }
-    Screen::License
+/// This fork starts directly on the main screen; no license is required.
+fn first_screen(_settings: &crate::settings::Settings) -> Screen {
+    Screen::Main
 }
 
 fn title() -> String {
