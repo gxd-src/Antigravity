@@ -52,6 +52,7 @@ mod patch_binary;
 mod patch_ide;
 mod portcheck;
 mod proxy;
+mod privacy;
 mod resolvers;
 mod routes;
 mod settings;
@@ -619,6 +620,10 @@ pub fn install_label(install: &Path) -> &'static str {
 }
 
 fn main() {
+    if env::args().any(|a| a == "--privacy-proxy") {
+        if proxy::run(0).is_err() { std::process::exit(1); }
+        return;
+    }
     #[cfg(windows)]
     if env::args_os().nth(1).is_some_and(|a| a == launch_guard::FLAG) {
         launch_guard::run();

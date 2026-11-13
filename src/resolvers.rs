@@ -336,69 +336,9 @@ pub fn provider_names() -> Vec<&'static str> {
     PROVIDERS.iter().map(|p| p.name).collect()
 }
 
+// Local build: no bundled third-party DNS/proxy providers.
 pub const PROVIDERS: &[Provider] = &[
-    // First on purpose. Measured 2026-08-30 against 8.8.8.8: it substitutes
-    // `cloudcode-pa.googleapis.com` for one of its own egress addresses (TTL 60),
-    // and that address accepts the SNI and answers as Google's own frontend
-    // (`Server: ESF`, valid certificate, TLS handshake 0.30 s).
-    //
-    // The address that measurement named was `186.246.45.126`, and it is written
-    // out here no longer ON PURPOSE: the service deleted that egress and returned
-    // the address to its hoster, and something else answers on it today (checked
-    // 2026-09-12, G43). The substitution still works — the service just answers
-    // with whichever egress it currently runs — so the FINDING holds and only the
-    // number expired. Do not re-derive it from a stranger's host.
-    // `cloudcode-pa` is the name a 22-resolver
-    // sweep found **nobody** substituting (S9) - the whole reason the client used
-    // to be pushed onto `daily-` instead (N15). It substitutes `daily-` and
-    // `generativelanguage` from the same address, and correctly passes
-    // `jetski-webchannel` through, so it is not a blanket rewriter.
-    //
-    // `v4`/`v6` are empty because it speaks **only** DoH over HTTP/2 - HTTP/1.1
-    // gets a 505 and its two addresses answer nothing on UDP:53. See `Transport`
-    // for why that emptiness is load-bearing rather than an omission.
-    Provider {
-        name: "dns-ai.ru",
-        v4: &[],
-        v6: &[],
-        transport: Transport::Doh(&DNS_AI),
-    },
-    // `eu.geohide.ru` replaced `geohide.ru` and `comss.one` in 2.31.0 (owner):
-    // comss no longer lifts the gate, and geohide is reached through its
-    // European resolver. Measured 2026-11-11 over UDP:53: it answers
-    // `daily-cloudcode-pa` with its own proxy addresses and passes
-    // `cloudcode-pa` through, so it carries one of the two gate names; the pool
-    // still decides per query, and dns-ai.ru is the one that carries both. Four
-    // of its seven A records answered; the rest (45.13.237.213, 5.175.161.40,
-    // 37.221.93.128) timed out and stay out until measured live (P14).
-    Provider {
-        name: "eu.geohide.ru",
-        v4: &[
-            "31.25.239.132",
-            "143.20.64.192",
-            "5.175.161.3",
-            "37.221.93.141",
-        ],
-        v6: &[],
-        transport: Transport::Udp,
-    },
-    // Last on purpose: the user's own server(s). Not a provider at all until
-    // they type one in: `provider_disabled` keeps it out of the race, the
-    // rotation and the head-of-list choice while the field is empty.
-    Provider {
-        name: CUSTOM_NAME,
-        v4: &[],
-        v6: &[],
-        transport: Transport::Custom,
-    },
-    // xbox-dns.ru is not here any more (owner, 2.14.0_1). Measured over the ISP
-    // link on 2026-09-18, both its resolvers answer both gate hosts with genuine
-    // Google (`172.217.x`, the set 8.8.8.8 gives) and substitute only
-    // `generativelanguage`, which is not ours to route (D18). It never won a race
-    // for either name, so all it contributed was a third party seeing the query,
-    // and a row in the window promising something it does not do. Its patcher
-    // reaches the gate hosts through its credentialed CONNECT relay instead, and
-    // that path is already a route of its own (`routes::Kind::Relay`).
+    Provider { name: CUSTOM_NAME, v4: &[], v6: &[], transport: Transport::Custom },
 ];
 
 /// Addresses are the three `dns.dns-ai.ru` resolves to, hardcoded so the relay can
@@ -865,50 +805,7 @@ fn remember_liveness(addr: IpAddr, alive: bool) {
 /// With no `sni` it falls back to the connection alone. A handshake that
 /// verified is remembered for `TLS_VERIFIED_FOR`.
 fn reachable(addr: IpAddr, budget: Duration, sni: Option<&str>) -> bool {
-    let Ok(sock) =
-        std::net::TcpStream::connect_timeout(&SocketAddr::new(addr, LIVENESS_PORT), budget)
-    else {
-        return false;
-    };
-    let Some(name) = sni else {
-        return true;
-    };
-    if tls_verified_recently(addr, name) {
-        return true;
-    }
-    let Ok(server) = ServerName::try_from(name.to_string()) else {
-        return false;
-    };
-    let Ok(mut conn) = ClientConnection::new(crate::proxy::probe_config(), server) else {
-        return false;
-    };
-    sock.set_read_timeout(Some(budget)).ok();
-    sock.set_write_timeout(Some(budget)).ok();
-    let mut sock = sock;
-    let deadline = Instant::now() + budget;
-    // Driven by hand rather than through `Stream`, so the budget covers the whole
-    // handshake and not each syscall inside it.
-    while conn.is_handshaking() {
-        if Instant::now() >= deadline {
-            return false;
-        }
-        if conn.wants_write() && conn.write_tls(&mut sock).is_err() {
-            return false;
-        }
-        if conn.wants_read() {
-            match conn.read_tls(&mut sock) {
-                Ok(0) => return false,
-                Ok(_) => {
-                    if conn.process_new_packets().is_err() {
-                        return false;
-                    }
-                }
-                Err(_) => return false,
-            }
-        }
-    }
-    remember_tls_verified(addr, name);
-    true
+    false
 }
 
 /// The addresses among `addrs` that will not accept a connection.

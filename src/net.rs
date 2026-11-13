@@ -66,11 +66,9 @@ pub fn tunnel_up() -> bool {
 /// connect — a kill-switch VPN drops it, a dead link refuses it — so the caller's
 /// ordinary fall-through to the next address or route is what handles it.
 pub fn connect(addr: SocketAddr, timeout: Duration, if_index: u32) -> io::Result<TcpStream> {
-    if if_index == 0 {
-        return TcpStream::connect_timeout(&addr, timeout);
-    }
-    connect_pinned(addr, timeout, if_index)
+    return Err(io::Error::new(io::ErrorKind::PermissionDenied, "Direct outbound TCP disabled"));
 }
+
 
 #[cfg(target_os = "windows")]
 fn connect_pinned(addr: SocketAddr, timeout: Duration, if_index: u32) -> io::Result<TcpStream> {

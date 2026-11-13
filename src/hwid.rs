@@ -1,12 +1,7 @@
 use std::sync::OnceLock;
 
 pub fn pc_code() -> &'static str {
-    static CODE: OnceLock<String> = OnceLock::new();
-    CODE.get_or_init(|| {
-        let raw = get_raw_hwid();
-        agu2_pc_code(&raw)
-    })
-    .as_str()
+    "LOCAL-NO-HWID"
 }
 
 fn agu2_pc_code(raw: &str) -> String {

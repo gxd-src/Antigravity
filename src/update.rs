@@ -137,28 +137,7 @@ fn tls_config() -> Arc<ClientConfig> {
 
 /// Connects a TCP stream to `host:port` with a connection timeout.
 fn connect_tcp(host: &str, port: u16) -> Result<TcpStream, String> {
-    let addrs: Vec<_> = (host, port)
-        .to_socket_addrs()
-        .map_err(|e| format!("DNS resolution failed for {}: {}", host, e))?
-        .collect();
-
-    let mut last_err = None;
-    for addr in addrs {
-        match TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT) {
-            Ok(sock) => {
-                sock.set_read_timeout(Some(IO_TIMEOUT)).ok();
-                sock.set_write_timeout(Some(IO_TIMEOUT)).ok();
-                return Ok(sock);
-            }
-            Err(e) => last_err = Some(e),
-        }
-    }
-    Err(format!(
-        "could not connect to {}:{}: {}",
-        host,
-        port,
-        last_err.map_or_else(|| "no address resolved".to_string(), |e| e.to_string())
-    ))
+    Err("Updates disabled".into())
 }
 
 /// Decodes HTTP chunked transfer encoding if present in response.
@@ -196,90 +175,9 @@ fn decode_chunked(raw: &[u8]) -> Result<Vec<u8>, String> {
 
 /// Synchronously fetches the latest release from the GitHub API over HTTPS.
 pub fn fetch_latest_release() -> Result<ReleaseInfo, String> {
-    let mut sock = connect_tcp(API_HOST, 443)?;
-
-    let server_name = ServerName::try_from(API_HOST)
-        .map_err(|e| format!("invalid TLS server name {}: {}", API_HOST, e))?;
-    let mut conn = ClientConnection::new(tls_config(), server_name)
-        .map_err(|e| format!("failed to initialize TLS client connection: {}", e))?;
-    let mut stream = rustls::Stream::new(&mut conn, &mut sock);
-
-    let req = format!(
-        "GET {} HTTP/1.1\r\n\
-         Host: {}\r\n\
-         User-Agent: ag_unlocker/{}\r\n\
-         Accept: application/vnd.github.v3+json\r\n\
-         Connection: close\r\n\r\n",
-        API_PATH,
-        API_HOST,
-        current_version()
-    );
-
-    stream
-        .write_all(req.as_bytes())
-        .map_err(|e| format!("failed to write HTTP request: {}", e))?;
-    stream
-        .flush()
-        .map_err(|e| format!("failed to flush request: {}", e))?;
-
-    let mut response_buf = Vec::new();
-    let mut chunk = [0u8; 4096];
-    loop {
-        match stream.read(&mut chunk) {
-            Ok(0) => break,
-            Ok(n) => {
-                response_buf.extend_from_slice(&chunk[..n]);
-                if response_buf.len() > MAX_BODY {
-                    return Err(format!("response body exceeded limit ({} bytes)", MAX_BODY));
-                }
-            }
-            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-            Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => {
-                // Connection closed without TLS close_notify alert
-                break;
-            }
-            Err(e) => return Err(format!("error reading HTTPS response: {}", e)),
-        }
-    }
-
-    if response_buf.is_empty() {
-        return Err("empty response received from GitHub API".to_string());
-    }
-
-    let header_delim = response_buf
-        .windows(4)
-        .position(|w| w == b"\r\n\r\n")
-        .ok_or_else(|| "missing header delimiter in HTTP response".to_string())?;
-
-    let header_bytes = &response_buf[..header_delim];
-    let header_str = String::from_utf8_lossy(header_bytes);
-    let body_raw = &response_buf[header_delim + 4..];
-
-    let mut lines = header_str.lines();
-    let status_line = lines.next().unwrap_or("");
-    if !status_line.contains(" 200") {
-        return Err(format!(
-            "GitHub API returned non-200 status: {}",
-            status_line
-        ));
-    }
-
-    let is_chunked = lines.any(|l| {
-        let lower = l.to_ascii_lowercase();
-        lower.starts_with("transfer-encoding:") && lower.contains("chunked")
-    });
-
-    let body_bytes = if is_chunked {
-        decode_chunked(body_raw)?
-    } else {
-        body_raw.to_vec()
-    };
-
-    let release: ReleaseInfo = serde_json::from_slice(&body_bytes)
-        .map_err(|e| format!("failed to deserialize release JSON: {}", e))?;
-
-    Ok(release)
+    return Err("Updates disabled in local source build".into());
 }
+
 
 /// Checks for updates respecting `CHECK_INTERVAL` (8 hours).
 /// If `force` is false, it uses the cached result if available and fresh.

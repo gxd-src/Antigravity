@@ -1,0 +1,10 @@
+/target/
+*.exe
+*.log
+.env
+.env.*
+/upstream.txt
+/settings.json
+/.relay_key
+/.exits
+/.group

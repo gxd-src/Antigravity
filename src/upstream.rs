@@ -240,6 +240,7 @@ impl Upstream {
 /// exactly like a proxy that is down.
 pub fn parse(input: &str) -> Result<Upstream, String> {
     let raw = input.trim();
+    if raw.starts_with("https://") { return Err("HTTPS proxy transport is not implemented; use http://".into()); }
     if raw.is_empty() {
         return Err("пустая строка".to_string());
     }
@@ -312,8 +313,10 @@ pub fn clear() {
 /// nothing beside the handshake that follows it - the same reasoning the old CA
 /// lookup used.
 pub fn configured() -> Option<Upstream> {
-    let raw = fs::read_to_string(config_path()).ok()?;
-    parse(&raw).ok()
+    let raw = std::env::var("AG_UPSTREAM_PROXY").ok()?;
+    let up = parse(&raw).ok()?;
+    if up.host.parse::<std::net::IpAddr>().is_err() || up.auth.is_some() { return None; }
+    Some(up)
 }
 
 /// Whether the route should be tried for this connection.
@@ -388,6 +391,10 @@ fn connect_within_budget(host: &str, port: u16, deadline: Instant) -> Result<Tcp
 /// because that is the thing a waiting client experiences. Bounding each part
 /// separately is how three seconds of patience turns into fifteen (I43).
 pub fn open(up: &Upstream, host: &str, port: u16, budget: Duration) -> Result<TcpStream, String> {
+    if !configured().is_some_and(|a| a.host == up.host && a.port == up.port) || up.auth.is_some()
+        || port != 443 || !crate::privacy::valid_host(host) {
+        return Err("Blocked by local proxy-only policy".into());
+    }
     let deadline = Instant::now() + budget;
     let mut sock = connect_within_budget(&up.host, up.port, deadline)?;
     let left = || deadline.saturating_duration_since(Instant::now());
@@ -452,7 +459,7 @@ pub fn open(up: &Upstream, host: &str, port: u16, budget: Duration) -> Result<Tc
         .to_string();
     // Not `starts_with("HTTP/1.1 200")`: a CONNECT proxy is free to answer on
     // HTTP/1.0, and tinyproxy - which is what the built-in exits run - does.
-    if !status.contains(" 200") {
+    if status.split_whitespace().nth(1) != Some("200") {
         // Two statuses are worth naming, because neither is an outage and neither
         // fixes itself however long the route is benched: 407 is a credential
         // problem, and 403 means this proxy filters by destination and does not
@@ -534,8 +541,9 @@ pub fn probe_health() {
 /// rotating to another one. Watching the address is how we notice that without
 /// asking the user to press anything.
 pub fn exit_info(up: &Upstream) -> Option<(String, String)> {
-    TRACE_HOSTS.iter().find_map(|h| trace_through(up, h))
+    return None;
 }
+
 
 /// Hosts that will report an exit back, in the order they are tried.
 ///
@@ -599,8 +607,9 @@ fn trace_through(up: &Upstream, host: &'static str) -> Option<(String, String)> 
 /// a dead network cannot hang the menu.
 #[allow(dead_code)]
 pub fn machine_exit() -> Option<(String, String)> {
-    TRACE_HOSTS.iter().find_map(|h| trace_direct(h))
+    return None;
 }
+
 
 #[allow(dead_code)]
 fn trace_direct(host: &'static str) -> Option<(String, String)> {

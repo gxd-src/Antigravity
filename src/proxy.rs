@@ -1185,49 +1185,23 @@ fn try_builtin_exit(client: TcpStream, _host: &str, _port: u16) -> Result<(), Tc
 }
 
 fn serve(mut client: TcpStream, _if_index: u32) {
+    // Strict local build: no route selection and no direct fallback.
     client.set_read_timeout(Some(REQUEST_IDLE)).ok();
-    let (host, port) = match read_connect(&mut client) {
-        Request::Connect(host, port) => (host, port),
-        Request::Malformed => {
-            client.write_all(RESP_NOT_ALLOWED).ok();
-            return;
+    match read_connect(&mut client) {
+        Request::Connect(host, 443) if crate::privacy::valid_host(&host) => {
+            let Some(up) = upstream::configured() else {
+                client.write_all(RESP_BAD_GATEWAY).ok(); return;
+            };
+            match upstream::open(&up, &host, 443, upstream::LIVE_OPEN_BUDGET) {
+                Ok(remote) => { if client.write_all(RESP_ESTABLISHED).is_ok() { splice(client, remote); } }
+                Err(_) => { client.write_all(RESP_BAD_GATEWAY).ok(); }
+            }
         }
-        Request::Gone => return,
-    };
-
-    // Four routes for a gate host, each handing the client back untouched if it
-    // cannot serve it, in the order the route table puts them (routes.rs):
-    //
-    //   - the user's own proxy, when they gave us one, always first. They typed
-    //     it in by hand, it is theirs rather than a third party we chose for
-    //     them, and silently overriding what somebody configured is not a speed
-    //     optimisation.
-    //   - the rest by measured speed: a plain direct tunnel to the address the
-    //     DNS layer substituted (0.28 s when last measured), a built-in exit -
-    //     somebody else's CONNECT proxy in a permitted region, which lifts the
-    //     gate outright (S25) - and the relay, cert-free but revocable.
-    //
-    // The table, not a fixed ladder, because the ladder was a guess about speed
-    // that the measurements contradicted (kb/rivals.md Fact 3); and a route
-    // that just carried a region 400 goes to the back (ls_log). Nothing is
-    // decided before `200 Connection Established` goes out, so falling from
-    // one to the next costs the client nothing (I35), and a tunnel already
-    // open keeps its route whatever the table says next.
-    if port == 443 && is_gate_host(&host) {
-        let _gate = routes::begin_gate_connection(&client, &host);
-        serve_gate(client, &host, port);
-        return;
+        Request::Gone => {},
+        _ => { client.write_all(RESP_NOT_ALLOWED).ok(); }
     }
-
-    // Everything that is not a gate host is a plain direct tunnel - including
-    // every other `*.googleapis.com` (e.g. `storage.googleapis.com`, which the
-    // Desktop app loads at startup). The proxy terminates no TLS and holds no CA:
-    // MITMing those hosts with a certificate no client trusts is exactly what
-    // black-screened the Desktop app with `BadCertificate`. The gate hosts are
-    // reached cert-free through the routes above; nothing here needs a CA.
-    client.set_read_timeout(None).ok();
-    tunnel(client, &host, port);
 }
+
 
 /// The most one gate connection may spend walking routes that fail to open.
 /// A client that came in through the loopback door is already in its TLS

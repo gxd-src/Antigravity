@@ -402,7 +402,7 @@ fn group_route() -> &'static Route {
 }
 
 pub fn available() -> bool {
-    get_active_key().is_some() && group_route().usable()
+    false // Local build: author group proxy disabled
 }
 
 fn agu2_config() -> std::sync::Arc<rustls::ClientConfig> {
@@ -508,30 +508,7 @@ fn open_tls(
     force_refresh: bool,
     budget: Duration,
 ) -> Result<(ClientConnection, TcpStream), String> {
-    let t_dns = Instant::now();
-    let (host, addrs) = server_addrs(server, force_refresh)?;
-    let dns_ms = t_dns.elapsed().as_millis() as u64;
-    let t_tcp = Instant::now();
-    let deadline = Instant::now() + budget;
-
-    let mut sock = None;
-    for addr in addrs {
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        if remaining.is_zero() {
-            break;
-        }
-        if let Ok(s) = TcpStream::connect_timeout(&addr, remaining) {
-            sock = Some(s);
-            break;
-        }
-    }
-    let sock = sock.ok_or_else(|| "не удалось подключиться".to_string())?;
-    sock.set_read_timeout(Some(budget)).ok();
-    sock.set_write_timeout(Some(budget)).ok();
-    STAGES.with(|c| c.set([dns_ms, t_tcp.elapsed().as_millis() as u64, 0]));
-    let name = ServerName::try_from(host).map_err(|_| "недопустимое имя сервера".to_string())?;
-    let tls = ClientConnection::new(agu2_config(), name).map_err(|e| e.to_string())?;
-    Ok((tls, sock))
+    Err("Group proxy disabled in local build".into())
 }
 
 fn fresh_nonce() -> Result<String, String> {

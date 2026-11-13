@@ -506,37 +506,9 @@ pub fn query_raw_via(
     if_index: u32,
     timeout: Duration,
 ) -> Result<Vec<u8>, String> {
-    let sock = UdpSocket::bind(("0.0.0.0", 0)).map_err(|_| "нет UDP-сокета".to_string())?;
-    if if_index != 0 {
-        sys::bind_socket_to_interface(&sock, if_index)?;
-    }
-    sock.set_read_timeout(Some(timeout)).ok();
-    sock.send_to(packet, SocketAddr::from((server, DNS_PORT)))
-        .map_err(|_| "запрос не отправлен".to_string())?;
-
-    let want_id = packet.get(0..2).map(|b| [b[0], b[1]]);
-    let deadline = Instant::now() + timeout;
-    let mut buf = [0u8; 4096];
-    loop {
-        let (n, from) = sock
-            .recv_from(&mut buf)
-            .map_err(|_| "резолвер не ответил".to_string())?;
-        // A stray packet must not end the wait: keep reading until the deadline
-        // for one that came from the resolver and answers the id we sent.
-        let right_source = from.ip() == IpAddr::V4(server);
-        let right_id = match (want_id, n >= 12) {
-            (Some(id), true) => buf[0..2] == id,
-            _ => false,
-        };
-        if right_source && right_id {
-            crate::net::note_reached();
-            return Ok(buf[..n].to_vec());
-        }
-        if Instant::now() >= deadline {
-            return Err("резолвер не ответил".to_string());
-        }
-    }
+    return Err("External DNS disabled: Squid resolves CONNECT hosts".into());
 }
+
 
 /// Asks `server` for the A records of `host`, forcing the query out of
 /// `if_index`. Pass 0 to let the routing table pick - useful for comparing what
